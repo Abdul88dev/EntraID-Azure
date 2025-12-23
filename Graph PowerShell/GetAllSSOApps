@@ -1,0 +1,56 @@
+Connect-MgGraph -Scopes "Application.Read.All","User.Read.All" -NoWelcome
+
+$ssoApps = Get-MgServicePrincipal -All -Filter "preferredSingleSignOnMode eq 'saml'" -Select * #"displayName,preferredSingleSignOnMode"
+#$ssoApps |Format-List  # Select-Object DisplayName, PreferredSingleSignOnMode
+$list = @()
+foreach ($app in $ssoApps) {
+    $keyCredentials = $app.KeyCredentials
+    $owners = Get-MgServicePrincipalOwner -ServicePrincipalId $app.Id
+    $ownersList = @()
+    if($null -ne $owners){foreach ($owner in $owners)
+    {
+       $ownersList += Get-Mguser -UserID $owner.Id | select DisplayName
+    }}
+    
+    foreach($key in $keyCredentials)
+    {
+        $list += [PSCustomObject]@{
+            AppId = $app.Id
+            AppDisplayName = $app.DisplayName
+            AppOwner = $ownersList.DisplayName
+            KeyDisplayName = $($key.DisplayName)
+            ExipreDate = $($key.EndDateTime)
+        }
+    }
+    
+}
+
+$list | Export-Csv .\AllsamlApps.csv
+
+$secrets = Get-MgApplication -All
+$secretLists = @()
+$secrets = $secrets | ? {$_.PasswordCredentials -ne $null} |select DisplayName,PasswordCredentials,Id,Owners,AppId
+foreach($secret in $secrets)
+{
+    $servicePrincipal = Get-MgServicePrincipal -Filter "AppId eq '$($secret.AppId)'" |select Id
+    $owners = Get-MgServicePrincipalOwner -ServicePrincipalId $servicePrincipal.Id
+    $ownersList = @()
+    if($null -ne $owners){
+        foreach ($owner in $owners)
+        {
+            try {
+                $ownersList += Get-Mguser -UserID $owner.Id | select DisplayName
+            }
+            catch {
+                $ownersList += Get-Mgroup -GroupId $owner.Id | select DisplayName
+            }
+        
+        }
+    }
+    $secretLists += [PSCustomObject]@{
+        DisplayName = $secret.DisplayName
+        Owners = $ownersList.DisplayName
+        ExpireDate =$secret.PasswordCredentials.EndDateTime
+    }
+}
+$secretLists |Export-Csv .\Allsecret.csv
